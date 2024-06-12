@@ -174,10 +174,10 @@ class TorchDFTD3Calculator(Calculator):
             self.cache_input_dicts["pos"] = torch.tensor(atoms.get_positions(), device=self.device, dtype=self.dtype)
             self.cache_input_dicts["Z"] = Z = torch.tensor(atoms.get_atomic_numbers(), device=self.device)
             ##
-            cell = atoms.get_cell()
-            S = self.cache_input_dicts["S"]
+            cell = torch.tensor(atoms.get_cell(), device=self.device, dtype=self.dtype)
+            S = self.cache_input_dicts["S"] # torch.tensor
             self.cache_input_dicts["shift_pos"] = torch.mm(S, cell.detach())
-            self.cache_input_dicts["cell"] = torch.tensor(cell, device=self.device, dtype=self.dtype)
+            self.cache_input_dicts["cell"] = cell
             self.count_rebuild += 1
             return self.cache_input_dicts
     
