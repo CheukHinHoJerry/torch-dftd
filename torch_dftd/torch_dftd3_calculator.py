@@ -10,6 +10,7 @@ from torch_dftd.functions.edge_extraction import calc_edge_index
 from torch_dftd.nn.dftd2_module import DFTD2Module
 from torch_dftd.nn.dftd3_module import DFTD3Module
 
+import numpy as np
 
 class TorchDFTD3Calculator(Calculator):
     """ase compatible DFTD3 calculator using pytorch
@@ -33,7 +34,7 @@ class TorchDFTD3Calculator(Calculator):
 
     name = "TorchDFTD3Calculator"
     implemented_properties = ["energy", "forces", "stress"]
-
+    
     def __init__(
         self,
         dft: Optional[Calculator] = None,
@@ -49,6 +50,11 @@ class TorchDFTD3Calculator(Calculator):
         dtype: torch.dtype = torch.float32,
         bidirectional: bool = True,
         cutoff_smoothing: str = "none",
+        # --- neighborlist specific params ---
+        every: int = -1, # time step that consider rebuild
+        delay: int = -1, # delay build neighbor list until this time step since last rebuilt
+        check: bool = False, # If true, rebuild if min(ats.positions - cached_position) > skin / 2, else must rebuild after "delay"
+        skin: float = None, # skin parameter for checking rebuild, in angstrom
         **kwargs,
     ):
         self.dft = dft
@@ -79,6 +85,26 @@ class TorchDFTD3Calculator(Calculator):
         self.dtype = dtype
         self.cutoff = cutoff
         self.bidirectional = bidirectional
+        # --- skin nlist ---
+        if every != -1 and delay != -1 and skin != None:
+            self.use_skin = True
+            #
+            self.every = every
+            self.delay = delay
+            self.check = check
+            if check and skin == None:
+                self.skin = cutoff / 10.0
+            else:
+                self.skin = skin
+            # enlarge the nlist by skin
+            self.cutoff += self.skin
+            # counter and caching tools
+            self.count_rebuild = 0 # count steps since last rebuild
+            self.count_check = 0 # count steps since last checking
+            self.cache_input_dicts = dict()
+            self.rebuild = True
+        else:
+            self.use_skin = False
         super(TorchDFTD3Calculator, self).__init__(atoms=atoms, **kwargs)
 
     def _calc_edge_index(
@@ -90,8 +116,9 @@ class TorchDFTD3Calculator(Calculator):
         return calc_edge_index(
             pos, cell, pbc, cutoff=self.cutoff, bidirectional=self.bidirectional
         )
-
-    def _preprocess_atoms(self, atoms: Atoms) -> Dict[str, Optional[Tensor]]:
+        
+    # take atoms and calcualte nlist
+    def _build_nlist(self, atoms) -> Dict[str, Optional[Tensor]]:
         pos = torch.tensor(atoms.get_positions(), device=self.device, dtype=self.dtype)
         Z = torch.tensor(atoms.get_atomic_numbers(), device=self.device)
         if any(atoms.pbc):
@@ -110,6 +137,45 @@ class TorchDFTD3Calculator(Calculator):
             pos=pos, Z=Z, cell=cell, pbc=pbc, edge_index=edge_index, shift_pos=shift_pos
         )
         return input_dicts
+    
+    # recompute logic gates
+    def _preprocess_atoms(self, atoms: Atoms) -> Dict[str, Optional[Tensor]]:
+        # 1. if we do not consider skin-nlist, or dict is empty
+        if not self.use_skin or not self.cache_input_dicts:
+            input_dicts = self._build_nlist(atoms)
+            self.cache_input_dicts = input_dicts # TODO: check is it ok not to do a deep copy
+            return input_dicts
+        
+        # --- below is only for for skin-nlist ---
+        # 2. first we do the checking and see if we need to update
+        if self.check:
+            assert self.count_check <= self.every # sanity check        
+            if self.count_check < self.every:
+                self.count_check += 1
+            elif self.count_check == self.every:
+                # check, comparing to last rebuilt here
+                cache_pos = self.cache_input_dicts["pos"]
+                pos = torch.tensor(atoms.get_positions(), device=self.device, dtype=self.dtype)
+                # TODO: we can sqeeuze performance here by using cache + sort as in lammps
+                if torch.max(torch.norm(cache_pos - pos, dim = 1)).item() > self.skin / 2:
+                    self.rebuild = True
+                else:
+                    self.rebuild = False
+                self.count_check = 0
+
+        # 3. if I know I need to rebuild by `check``, and `count_rebuild` >= `delay`
+        if self.rebuild and self.count_rebuild >= self.delay: 
+            input_dicts = self._build_nlist(atoms)
+            self.cache_input_dicts = input_dicts # TODO: check is it ok not to do a deep copy
+            self.count_rebuild = 0
+            return input_dicts
+        else:    # this should occur more frequently, but for clarity this is easier to look at now
+            self.count_rebuild += 1
+            return self.cache_input_dicts
+    
+    def reset_counter(self):
+        self.count_check = 0
+        self.count_rebuild = 0
 
     def calculate(self, atoms=None, properties=["energy"], system_changes=all_changes):
         Calculator.calculate(self, atoms, properties, system_changes)
