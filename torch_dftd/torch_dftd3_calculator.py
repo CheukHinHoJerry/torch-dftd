@@ -93,7 +93,7 @@ class TorchDFTD3Calculator(Calculator):
             self.delay = delay
             self.check = check
             if check and skin == None:
-                self.skin = cutoff / 10.0
+                self.skin = 0.2
             else:
                 self.skin = skin
             # enlarge the nlist by skin
@@ -134,7 +134,7 @@ class TorchDFTD3Calculator(Calculator):
         else:
             shift_pos = torch.mm(S, cell.detach())
         input_dicts = dict(
-            pos=pos, Z=Z, cell=cell, pbc=pbc, edge_index=edge_index, shift_pos=shift_pos
+            pos=pos, Z=Z, cell=cell, pbc=pbc, edge_index=edge_index, shift_pos=shift_pos, S = S
         )
         return input_dicts
     
@@ -149,13 +149,13 @@ class TorchDFTD3Calculator(Calculator):
         # --- below is only for for skin-nlist ---
         # 2. first we do the checking and see if we need to update
         if self.check:
-            assert self.count_check <= self.every # sanity check        
-            if self.count_check < self.every:
+            assert self.count_check <= self.every - 1 # sanity check        
+            if self.count_check < self.every - 1:
                 self.count_check += 1
-            elif self.count_check == self.every:
+            elif self.count_check == self.every - 1:
                 # check, comparing to last rebuilt here
-                cache_pos = self.cache_input_dicts["pos"]
-                pos = torch.tensor(atoms.get_positions(), device=self.device, dtype=self.dtype)
+                cache_pos = self.cache_input_dicts["pos"].detach()
+                pos = torch.tensor(atoms.get_positions(), device=self.device, dtype=self.dtype, requires_grad=False)
                 # TODO: we can sqeeuze performance here by using cache + sort as in lammps
                 if torch.max(torch.norm(cache_pos - pos, dim = 1)).item() > self.skin / 2:
                     self.rebuild = True
@@ -170,6 +170,14 @@ class TorchDFTD3Calculator(Calculator):
             self.count_rebuild = 0
             return input_dicts
         else:    # this should occur more frequently, but for clarity this is easier to look at now
+            # update position, atomic number of cell
+            self.cache_input_dicts["pos"] = torch.tensor(atoms.get_positions(), device=self.device, dtype=self.dtype)
+            self.cache_input_dicts["Z"] = Z = torch.tensor(atoms.get_atomic_numbers(), device=self.device)
+            ##
+            cell = atoms.get_cell()
+            S = self.cache_input_dicts["S"]
+            self.cache_input_dicts["shift_pos"] = torch.mm(S, cell.detach())
+            self.cache_input_dicts["cell"] = torch.tensor(cell, device=self.device, dtype=self.dtype)
             self.count_rebuild += 1
             return self.cache_input_dicts
     
@@ -180,6 +188,8 @@ class TorchDFTD3Calculator(Calculator):
     def calculate(self, atoms=None, properties=["energy"], system_changes=all_changes):
         Calculator.calculate(self, atoms, properties, system_changes)
         input_dicts = self._preprocess_atoms(atoms)
+        # no need S onwards
+        input_dicts.pop("S")
 
         if "forces" in properties or "stress" in properties:
             results = self.dftd_module.calc_energy_and_forces(**input_dicts, damping=self.damping)[
