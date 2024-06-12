@@ -188,15 +188,27 @@ class TorchDFTD3Calculator(Calculator):
     def calculate(self, atoms=None, properties=["energy"], system_changes=all_changes):
         Calculator.calculate(self, atoms, properties, system_changes)
         input_dicts = self._preprocess_atoms(atoms)
-        # no need S onwards
-        input_dicts.pop("S")
 
         if "forces" in properties or "stress" in properties:
-            results = self.dftd_module.calc_energy_and_forces(**input_dicts, damping=self.damping)[
+            results = self.dftd_module.calc_energy_and_forces(
+                pos = input_dicts["pos"],
+                Z = input_dicts["Z"],
+                cell = input_dicts["cell"],
+                pbc = input_dicts["pbc"],
+                edge_index = input_dicts["edge_index"],
+                shift_pos = input_dicts["shift_pos"],
+                damping=self.damping)[
                 0
             ]
         else:
-            results = self.dftd_module.calc_energy(**input_dicts, damping=self.damping)[0]
+            results = self.dftd_module.calc_energy(
+                pos = input_dicts["pos"],
+                Z = input_dicts["Z"],
+                cell = input_dicts["cell"],
+                pbc = input_dicts["pbc"],
+                edge_index = input_dicts["edge_index"],
+                shift_pos = input_dicts["shift_pos"],
+                damping=self.damping)[0]
         self.results["energy"] = results["energy"]
         self.results["free_energy"] = self.results["energy"]
 
