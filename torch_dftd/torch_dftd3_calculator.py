@@ -87,6 +87,7 @@ class TorchDFTD3Calculator(Calculator):
         self.cutoff = cutoff
         self.bidirectional = bidirectional
         # --- skin nlist ---
+        self.Nrebuilds = 0 # record number of rebuilding nlist
         if every != -1 and delay != -1 and skin != None:
             self.use_skin = True
             #
@@ -104,7 +105,6 @@ class TorchDFTD3Calculator(Calculator):
             self.count_check = 0 # count steps since last checking
             self.cache_input_dicts = dict()
             self.rebuild = True
-            self.Nrebuilds = 0 # record number of rebuilding nlist
         else:
             self.use_skin = False
         super(TorchDFTD3Calculator, self).__init__(atoms=atoms, **kwargs)
