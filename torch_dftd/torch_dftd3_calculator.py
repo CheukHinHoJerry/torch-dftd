@@ -170,8 +170,6 @@ class TorchDFTD3Calculator(Calculator):
                 # current position
                 pos = torch.tensor(atoms.get_positions(), device=self.device, dtype=self.dtype, requires_grad=False)
                 # TODO: we can sqeeuze performance here by using cache + sort as in lammps
-                print(cache_pos[0, :])
-                print(torch.max(torch.norm(cache_pos - pos, dim = 1)).item())
                 if torch.max(torch.norm(cache_pos - pos, dim = 1)).item() > self.skin / 2:
                     self.rebuild = True
                 else:
@@ -180,7 +178,6 @@ class TorchDFTD3Calculator(Calculator):
 
         # 3. if I know I need to rebuild by `check``, and `count_rebuild` >= `delay`
         if self.rebuild and self.count_rebuild >= self.delay: 
-            print("rebuilding nlist")
             input_dicts = self._build_nlist(atoms)
             self.cache_input_dicts = copy.deepcopy(input_dicts) # TODO: check is it ok not to do a deep copy
             self.count_rebuild = 0
