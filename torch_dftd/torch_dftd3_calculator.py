@@ -11,6 +11,7 @@ from torch_dftd.nn.dftd2_module import DFTD2Module
 from torch_dftd.nn.dftd3_module import DFTD3Module
 
 import numpy as np
+import copy
 
 class TorchDFTD3Calculator(Calculator):
     """ase compatible DFTD3 calculator using pytorch
@@ -103,6 +104,7 @@ class TorchDFTD3Calculator(Calculator):
             self.count_check = 0 # count steps since last checking
             self.cache_input_dicts = dict()
             self.rebuild = True
+            self.Nrebuilds = 0 # record number of rebuilding nlist
         else:
             self.use_skin = False
         super(TorchDFTD3Calculator, self).__init__(atoms=atoms, **kwargs)
@@ -133,20 +135,30 @@ class TorchDFTD3Calculator(Calculator):
             shift_pos = S
         else:
             shift_pos = torch.mm(S, cell.detach())
+        
+        # passes the S matrix too since we need that to calculate shift_post when 
+        # we do not rebuild the nlist
         input_dicts = dict(
+            old_pos = copy.deepcopy(pos),
             pos=pos, Z=Z, cell=cell, pbc=pbc, edge_index=edge_index, shift_pos=shift_pos, S = S
         )
+        # keep track of number of times nlist being rebuilt
+        self.Nrebuilds += 1
         return input_dicts
     
     # recompute logic gates
     def _preprocess_atoms(self, atoms: Atoms) -> Dict[str, Optional[Tensor]]:
-        # 1. if we do not consider skin-nlist, or dict is empty
-        if not self.use_skin or not self.cache_input_dicts:
-            input_dicts = self._build_nlist(atoms)
-            self.cache_input_dicts = input_dicts # TODO: check is it ok not to do a deep copy
+        # if we do not consider skin-nlist, or dict is empty
+        if not self.use_skin:
+            return self._build_nlist(atoms)
+
+        # --- below is only for for skin-nlist ---
+        # 1. if dict empty (init)
+        if not self.cache_input_dicts:
+            input_dicts =  self._build_nlist(atoms)
+            self.cache_input_dicts = copy.deepcopy(input_dicts) # TODO: check is it ok not to do a deep copy
             return input_dicts
         
-        # --- below is only for for skin-nlist ---
         # 2. first we do the checking and see if we need to update
         if self.check:
             assert self.count_check <= self.every - 1 # sanity check        
@@ -154,9 +166,12 @@ class TorchDFTD3Calculator(Calculator):
                 self.count_check += 1
             elif self.count_check == self.every - 1:
                 # check, comparing to last rebuilt here
-                cache_pos = self.cache_input_dicts["pos"].detach()
+                cache_pos = self.cache_input_dicts["old_pos"].detach()
+                # current position
                 pos = torch.tensor(atoms.get_positions(), device=self.device, dtype=self.dtype, requires_grad=False)
                 # TODO: we can sqeeuze performance here by using cache + sort as in lammps
+                print(cache_pos[0, :])
+                print(torch.max(torch.norm(cache_pos - pos, dim = 1)).item())
                 if torch.max(torch.norm(cache_pos - pos, dim = 1)).item() > self.skin / 2:
                     self.rebuild = True
                 else:
@@ -165,14 +180,15 @@ class TorchDFTD3Calculator(Calculator):
 
         # 3. if I know I need to rebuild by `check``, and `count_rebuild` >= `delay`
         if self.rebuild and self.count_rebuild >= self.delay: 
+            print("rebuilding nlist")
             input_dicts = self._build_nlist(atoms)
-            self.cache_input_dicts = input_dicts # TODO: check is it ok not to do a deep copy
+            self.cache_input_dicts = copy.deepcopy(input_dicts) # TODO: check is it ok not to do a deep copy
             self.count_rebuild = 0
             return input_dicts
         else:    # this should occur more frequently, but for clarity this is easier to look at now
             # update position, atomic number of cell
             self.cache_input_dicts["pos"] = torch.tensor(atoms.get_positions(), device=self.device, dtype=self.dtype)
-            self.cache_input_dicts["Z"] = Z = torch.tensor(atoms.get_atomic_numbers(), device=self.device)
+            self.cache_input_dicts["Z"] = torch.tensor(atoms.get_atomic_numbers(), device=self.device)
             ##
             cell = torch.tensor(atoms.get_cell(), device=self.device, dtype=self.dtype)
             S = self.cache_input_dicts["S"] # torch.tensor
@@ -184,6 +200,7 @@ class TorchDFTD3Calculator(Calculator):
     def reset_counter(self):
         self.count_check = 0
         self.count_rebuild = 0
+        self.Nrebuilds = 0
 
     def calculate(self, atoms=None, properties=["energy"], system_changes=all_changes):
         Calculator.calculate(self, atoms, properties, system_changes)
