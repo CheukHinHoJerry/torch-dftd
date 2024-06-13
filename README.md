@@ -33,14 +33,14 @@ print(f"forces {forces}")
 
 ## Using skin-type neighborlist
 Recomputing neighborlist everystep is slow, especially when the cutoff of d3 correction is large.
-A naive implementation of neighborlist with skin layer is provided with hyperparameter specified similar to [LAMMPS](https://docs.lammps.org/neigh_modify.html#description). Simply replacing the calc with the following:
+A naive implementation of neighborlist with skin layer is provided with hyperparameters similar to [LAMMPS](https://docs.lammps.org/neigh_modify.html#description). Simply replacing `calc` with the following:
 
 ```python
 calc = TorchDFTD3Calculator(atoms=atoms, device="cpu", damping="bj",
  every = 2, delay = 10, check = True, skin = 2.0) # skin-type nlist parameters
 ```
 where the additional parameters `every`, `delay`. `check` and `skin` will allow reusing neighborlist 
-as specified in the LAMMPS documentation. The uni of `skin` has the same unit as prescribed in the `atoms` object that is usually in angstrom.
+as specified in the LAMMPS documentation. The unit of `skin` is the same as prescribed in the `atoms` object that is usually in angstrom.
 
 ## Dependency
 
