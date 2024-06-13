@@ -1,5 +1,7 @@
+import copy
 from typing import Dict, Optional, Tuple
 
+import numpy as np
 import torch
 from ase import Atoms
 from ase.calculators.calculator import Calculator, PropertyNotImplementedError, all_changes
@@ -10,8 +12,6 @@ from torch_dftd.functions.edge_extraction import calc_edge_index
 from torch_dftd.nn.dftd2_module import DFTD2Module
 from torch_dftd.nn.dftd3_module import DFTD3Module
 
-import numpy as np
-import copy
 
 class TorchDFTD3Calculator(Calculator):
     """ase compatible DFTD3 calculator using pytorch
@@ -35,7 +35,7 @@ class TorchDFTD3Calculator(Calculator):
 
     name = "TorchDFTD3Calculator"
     implemented_properties = ["energy", "forces", "stress"]
-    
+
     def __init__(
         self,
         dft: Optional[Calculator] = None,
@@ -52,10 +52,10 @@ class TorchDFTD3Calculator(Calculator):
         bidirectional: bool = True,
         cutoff_smoothing: str = "none",
         # --- neighborlist specific params ---
-        every: int = -1, # time step that consider rebuild
-        delay: int = -1, # delay build neighbor list until this time step since last rebuilt
-        check: bool = False, # If true, rebuild if min(ats.positions - cached_position) > skin / 2, else must rebuild after "delay"
-        skin: float = None, # skin parameter for checking rebuild, in angstrom
+        every: int = -1,  # time step that consider rebuild
+        delay: int = -1,  # delay build neighbor list until this time step since last rebuilt
+        check: bool = False,  # If true, rebuild if min(ats.positions - cached_position) > skin / 2, else must rebuild after "delay"
+        skin: float = None,  # skin parameter for checking rebuild, in angstrom
         **kwargs,
     ):
         self.dft = dft
@@ -87,7 +87,7 @@ class TorchDFTD3Calculator(Calculator):
         self.cutoff = cutoff
         self.bidirectional = bidirectional
         # --- skin nlist ---
-        self.Nrebuilds = 0 # record number of rebuilding nlist
+        self.Nrebuilds = 0  # record number of rebuilding nlist
         if every != -1 and delay != -1 and skin != None:
             self.use_skin = True
             #
@@ -101,8 +101,8 @@ class TorchDFTD3Calculator(Calculator):
             # enlarge the nlist by skin
             self.cutoff += self.skin
             # counter and caching tools
-            self.count_rebuild = 0 # count steps since last rebuild
-            self.count_check = 0 # count steps since last checking
+            self.count_rebuild = 0  # count steps since last rebuild
+            self.count_check = 0  # count steps since last checking
             self.cache_input_dicts = dict()
             self.rebuild = True
         else:
@@ -118,7 +118,7 @@ class TorchDFTD3Calculator(Calculator):
         return calc_edge_index(
             pos, cell, pbc, cutoff=self.cutoff, bidirectional=self.bidirectional
         )
-        
+
     # take atoms and calcualte nlist
     def _build_nlist(self, atoms) -> Dict[str, Optional[Tensor]]:
         pos = torch.tensor(atoms.get_positions(), device=self.device, dtype=self.dtype)
@@ -135,17 +135,23 @@ class TorchDFTD3Calculator(Calculator):
             shift_pos = S
         else:
             shift_pos = torch.mm(S, cell.detach())
-        
-        # passes the S matrix too since we need that to calculate shift_post when 
+
+        # passes the S matrix too since we need that to calculate shift_post when
         # we do not rebuild the nlist
         input_dicts = dict(
-            old_pos = copy.deepcopy(pos),
-            pos=pos, Z=Z, cell=cell, pbc=pbc, edge_index=edge_index, shift_pos=shift_pos, S = S
+            old_pos=copy.deepcopy(pos),
+            pos=pos,
+            Z=Z,
+            cell=cell,
+            pbc=pbc,
+            edge_index=edge_index,
+            shift_pos=shift_pos,
+            S=S,
         )
         # keep track of number of times nlist being rebuilt
         self.Nrebuilds += 1
         return input_dicts
-    
+
     # recompute logic gates
     def _preprocess_atoms(self, atoms: Atoms) -> Dict[str, Optional[Tensor]]:
         # if we do not consider skin-nlist, or dict is empty
@@ -155,45 +161,58 @@ class TorchDFTD3Calculator(Calculator):
         # --- below is only for for skin-nlist ---
         # 1. if dict empty (init)
         if not self.cache_input_dicts:
-            input_dicts =  self._build_nlist(atoms)
-            self.cache_input_dicts = copy.deepcopy(input_dicts) # TODO: check is it ok not to do a deep copy
+            input_dicts = self._build_nlist(atoms)
+            self.cache_input_dicts = copy.deepcopy(
+                input_dicts
+            )  # TODO: check is it ok not to do a deep copy
             return input_dicts
-        
+
         # 2. first we do the checking and see if we need to update
         if self.check:
-            assert self.count_check <= self.every - 1 # sanity check        
+            assert self.count_check <= self.every - 1  # sanity check
             if self.count_check < self.every - 1:
                 self.count_check += 1
             elif self.count_check == self.every - 1:
                 # check, comparing to last rebuilt here
                 cache_pos = self.cache_input_dicts["old_pos"].detach()
                 # current position
-                pos = torch.tensor(atoms.get_positions(), device=self.device, dtype=self.dtype, requires_grad=False)
+                pos = torch.tensor(
+                    atoms.get_positions(),
+                    device=self.device,
+                    dtype=self.dtype,
+                    requires_grad=False,
+                )
                 # TODO: we can sqeeuze performance here by using cache + sort as in lammps
-                if torch.max(torch.norm(cache_pos - pos, dim = 1)).item() > self.skin / 2:
+                if torch.max(torch.norm(cache_pos - pos, dim=1)).item() > self.skin / 2:
                     self.rebuild = True
                 else:
                     self.rebuild = False
                 self.count_check = 0
 
         # 3. if I know I need to rebuild by `check``, and `count_rebuild` >= `delay`
-        if self.rebuild and self.count_rebuild >= self.delay: 
+        if self.rebuild and self.count_rebuild >= self.delay:
             input_dicts = self._build_nlist(atoms)
-            self.cache_input_dicts = copy.deepcopy(input_dicts) # TODO: check is it ok not to do a deep copy
+            self.cache_input_dicts = copy.deepcopy(
+                input_dicts
+            )  # TODO: check is it ok not to do a deep copy
             self.count_rebuild = 0
             return input_dicts
-        else:    # this should occur more frequently, but for clarity this is easier to look at now
+        else:  # this should occur more frequently, but for clarity this is easier to look at now
             # update position, atomic number of cell
-            self.cache_input_dicts["pos"] = torch.tensor(atoms.get_positions(), device=self.device, dtype=self.dtype)
-            self.cache_input_dicts["Z"] = torch.tensor(atoms.get_atomic_numbers(), device=self.device)
+            self.cache_input_dicts["pos"] = torch.tensor(
+                atoms.get_positions(), device=self.device, dtype=self.dtype
+            )
+            self.cache_input_dicts["Z"] = torch.tensor(
+                atoms.get_atomic_numbers(), device=self.device
+            )
             ##
             cell = torch.tensor(atoms.get_cell(), device=self.device, dtype=self.dtype)
-            S = self.cache_input_dicts["S"] # torch.tensor
+            S = self.cache_input_dicts["S"]  # torch.tensor
             self.cache_input_dicts["shift_pos"] = torch.mm(S, cell.detach())
             self.cache_input_dicts["cell"] = cell
             self.count_rebuild += 1
             return self.cache_input_dicts
-    
+
     def reset_counter(self):
         self.count_check = 0
         self.count_rebuild = 0
@@ -205,24 +224,24 @@ class TorchDFTD3Calculator(Calculator):
 
         if "forces" in properties or "stress" in properties:
             results = self.dftd_module.calc_energy_and_forces(
-                pos = input_dicts["pos"],
-                Z = input_dicts["Z"],
-                cell = input_dicts["cell"],
-                pbc = input_dicts["pbc"],
-                edge_index = input_dicts["edge_index"],
-                shift_pos = input_dicts["shift_pos"],
-                damping=self.damping)[
-                0
-            ]
+                pos=input_dicts["pos"],
+                Z=input_dicts["Z"],
+                cell=input_dicts["cell"],
+                pbc=input_dicts["pbc"],
+                edge_index=input_dicts["edge_index"],
+                shift_pos=input_dicts["shift_pos"],
+                damping=self.damping,
+            )[0]
         else:
             results = self.dftd_module.calc_energy(
-                pos = input_dicts["pos"],
-                Z = input_dicts["Z"],
-                cell = input_dicts["cell"],
-                pbc = input_dicts["pbc"],
-                edge_index = input_dicts["edge_index"],
-                shift_pos = input_dicts["shift_pos"],
-                damping=self.damping)[0]
+                pos=input_dicts["pos"],
+                Z=input_dicts["Z"],
+                cell=input_dicts["cell"],
+                pbc=input_dicts["pbc"],
+                edge_index=input_dicts["edge_index"],
+                shift_pos=input_dicts["shift_pos"],
+                damping=self.damping,
+            )[0]
         self.results["energy"] = results["energy"]
         self.results["free_energy"] = self.results["energy"]
 
@@ -263,9 +282,11 @@ class TorchDFTD3Calculator(Calculator):
         shift_index_array = torch.cumsum(torch.tensor([0] + n_nodes_list), dim=0)
         cell_batch = torch.stack(
             [
-                torch.eye(3, device=self.device, dtype=self.dtype)
-                if d["cell"] is None
-                else d["cell"]
+                (
+                    torch.eye(3, device=self.device, dtype=self.dtype)
+                    if d["cell"] is None
+                    else d["cell"]
+                )
                 for d in input_dicts_list
             ]
         )

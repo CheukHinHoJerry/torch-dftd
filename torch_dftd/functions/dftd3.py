@@ -1,4 +1,5 @@
 """pytorch implementation of Grimme's D3 method"""  # NOQA
+
 from typing import Dict, Optional
 
 import torch
