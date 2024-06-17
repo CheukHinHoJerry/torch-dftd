@@ -172,7 +172,7 @@ class TorchDFTD3Calculator(Calculator):
             assert self.count_check <= self.every - 1  # sanity check
             if self.count_check < self.every - 1:
                 self.count_check += 1
-            elif self.count_check == self.every - 1 and self.count_rebuild >= self.delay:
+            elif self.count_check == self.every - 1: # TODO: this constrain can be release to prevent meaningless checking
                 # check, comparing to last rebuilt here
                 cache_pos = self.cache_input_dicts["old_pos"].detach()
                 # current position
@@ -188,7 +188,6 @@ class TorchDFTD3Calculator(Calculator):
                 else:
                     self.rebuild = False
                 self.count_check = 0
-
         # 3. if I know I need to rebuild by `check``, and `count_rebuild` >= `delay`
         if self.rebuild and self.count_rebuild >= self.delay:
             input_dicts = self._build_nlist(atoms)
@@ -214,9 +213,10 @@ class TorchDFTD3Calculator(Calculator):
             return self.cache_input_dicts
 
     def reset_counter(self):
-        self.count_check = 0
-        self.count_rebuild = 0
-        self.Nrebuilds = 0
+        if self.use_skin:
+            self.count_check = 0
+            self.count_rebuild = 0
+            self.Nrebuilds = 0
 
     def calculate(self, atoms=None, properties=["energy"], system_changes=all_changes):
         Calculator.calculate(self, atoms, properties, system_changes)
