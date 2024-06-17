@@ -172,7 +172,7 @@ class TorchDFTD3Calculator(Calculator):
             assert self.count_check <= self.every - 1  # sanity check
             if self.count_check < self.every - 1:
                 self.count_check += 1
-            elif self.count_check == self.every - 1:
+            elif self.count_check == self.every - 1 and self.count_rebuild >= self.delay:
                 # check, comparing to last rebuilt here
                 cache_pos = self.cache_input_dicts["old_pos"].detach()
                 # current position
