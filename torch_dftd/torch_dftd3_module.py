@@ -120,12 +120,12 @@ class TorchDFTD3TorchCalculator(nn.Module):
         # in torch_dftd3_calculator.py
         # data is from libSG
         # old_pos = copy.deepcopy(data['positions']),
-        pos=input_data['positions']
-        Z = input_data['Z']
-        cell = input_data['cell']
-        pbc = input_data['pbc']
-        edge_index = input_data['edge_index']
-        S = input_data["unit_shifts"]
+        pos=input_data['positions'].to(self.device)
+        Z = input_data['Z'].to(self.device)
+        cell = input_data['cell'].to(self.device)
+        pbc = input_data['pbc'].to(self.device)
+        edge_index = input_data['edge_index'].to(self.device)
+        S = input_data["unit_shifts"].to(self.device)
 
         # transform S here
         # if any(pbc):
