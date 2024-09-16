@@ -10,6 +10,9 @@ from torch_dftd.functions.dftd3 import d3_autoang, d3_autoev, edisp
 from torch_dftd.functions.distance import calc_distances
 from torch_dftd.nn.base_dftd_module import BaseDFTDModule
 
+# >>> Bohr
+# 0.5291772105638411
+
 
 class DFTD3Module(BaseDFTDModule):
     """DFTD3Module
@@ -28,8 +31,8 @@ class DFTD3Module(BaseDFTDModule):
     def __init__(
         self,
         params: Dict[str, float],
-        cutoff: float = 95.0 * Bohr,
-        cnthr: float = 40.0 * Bohr,
+        cutoff: float = 95.0 * 0.5291772105638411,
+        cnthr: float = 40.0 * 0.5291772105638411,
         abc: bool = False,
         dtype=torch.float32,
         bidirectional: bool = False,
@@ -71,36 +74,38 @@ class DFTD3Module(BaseDFTDModule):
         Z: Tensor,
         pos: Tensor,
         edge_index: Tensor,
-        cell: Optional[Tensor] = None,
-        pbc: Optional[Tensor] = None,
-        shift_pos: Optional[Tensor] = None,
-        batch: Optional[Tensor] = None,
-        batch_edge: Optional[Tensor] = None,
+        cell: Tensor,
+        pbc: Tensor,
+        shift_pos: Tensor,
         damping: str = "zero",
     ) -> Tensor:
         """Forward computation to calculate atomic wise dispersion energy"""
         shift_pos = pos.new_zeros((edge_index.size()[1], 3, 3)) if shift_pos is None else shift_pos
-        pos_bohr = pos / d3_autoang  # angstrom -> bohr
-        if cell is None:
-            cell_bohr: Optional[Tensor] = None
-        else:
-            cell_bohr = cell / d3_autoang  # angstrom -> bohr
-        shift_bohr = shift_pos / d3_autoang  # angstrom -> bohr
+        pos_bohr = pos / 0.52917726  # angstrom -> bohr
+        # if cell is None:
+        #     cell_bohr: Tensor = None
+        # else:
+        cell_bohr = cell / 0.52917726  # angstrom -> bohr
+        shift_bohr = shift_pos / 0.52917726  # angstrom -> bohr
         r = calc_distances(pos_bohr, edge_index, cell_bohr, shift_bohr)
         # E_disp (n_graphs,): Energy in eV unit
-        E_disp = d3_autoev * edisp(
+        c6ab: torch.Tensor = self.c6ab 
+        r0ab: torch.Tensor = self.r0ab 
+        rcov: torch.Tensor = self.rcov 
+        r2r4: torch.Tensor = self.r2r4
+        E_disp = 27.21138505 * edisp(
             Z,
             r,
             edge_index,
-            c6ab=self.c6ab,  # type:ignore
-            r0ab=self.r0ab,  # type:ignore
-            rcov=self.rcov,  # type:ignore
-            r2r4=self.r2r4,  # type:ignore
+            c6ab,
+            r0ab,
+            rcov,
+            r2r4,
             params=self.params,
-            cutoff=self.cutoff / Bohr,
-            cnthr=self.cnthr / Bohr,
-            batch=batch,
-            batch_edge=batch_edge,
+            cutoff=self.cutoff / 0.5291772105638411,
+            cnthr=self.cnthr / 0.5291772105638411,
+            #batch=None, #batch,
+            #batch_edge=None,#batch_edge,
             shift_pos=shift_bohr,
             damping=damping,
             cutoff_smoothing=self.cutoff_smoothing,

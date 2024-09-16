@@ -7,9 +7,9 @@ from torch_dftd.functions.triplets_kernel import _calc_triplets_core_gpu
 
 def calc_triplets(
     edge_index: Tensor,
-    shift_pos: Optional[Tensor] = None,
+    shift_pos: Tensor = None,
     dtype=torch.float32,
-    batch_edge: Optional[Tensor] = None,
+    batch_edge: Tensor = None,
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
     """Calculate triplet edge index.
 

@@ -195,6 +195,6 @@ c6 = torch.tensor(
 
 
 def get_dftd2_params() -> Tuple[Tensor, Tensor]:
-    r0ab = (r0[:, None] + r0[None, :]) / d3_autoang
+    r0ab = (r0[:, None] + r0[None, :]) / 0.52917726
     c6ab = torch.sqrt(c6[:, None] * c6[None, :]) * c6conv
     return r0ab, c6ab
