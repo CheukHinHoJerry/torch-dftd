@@ -5,27 +5,29 @@ from torch_dftd.torch_dftd3_calculator import TorchDFTD3Calculator
 from torch_dftd.torch_dftd3_module import TorchDFTD3TorchCalculator
 from torch_dftd.dftd3_xc_params import get_dftd3_default_params
 
+from ase.units import Bohr
+
 ##
 # --- parameters ---
 dft = "d3"
 damping = "bj"
 xc: str = "pbe"
-old: bool = False
+old: bool = False # default
 device: str = "cuda:0"
 cutoff: float = 40.0 * Bohr
-cnthr: float = 40.0 * Bohr
+cnthr: float = 40.0 * Bohr # default
 abc: bool = False
 # --- torch dftd3 specific params ---
-dtype: torch.dtype = torch.float64
-bidirectional: bool = True
-cutoff_smoothing: str = "none"
+#dtype: torch.dtype = torch.float64
+#bidirectional: bool = True
+#cutoff_smoothing: str = "none"
 
 ## ===
 
 # new d3 module
 new_d3_module = TorchDFTD3TorchCalculator(
-    device="cuda:0", damping=damping, 
-    dtype=torch.float32, xc="pbe", cutoff=cutoff
+    device=device, damping=damping, 
+    dtype=torch.float64, xc=xc, cutoff=cutoff
 )
 
 #
