@@ -40,6 +40,18 @@ calc = TorchDFTD3Calculator(atoms=atoms, device="cpu", damping="bj",
 ```
 Here, the additional parameters `every`, `delay`, `check`, and `skin` allow reusing the neighbor list as specified in the [LAMMPS](https://docs.lammps.org/neigh_modify.html#description) documentation. The `skin` parameter defines the buffer region around the cutoff distance and has the same unit as specified in the `atoms` object, which is typically in angstroms.
 
+
+## Compile as torch.pt file
+To use the d3 calculator in C++, an easiest way is to compile the d3 `nn.Module` as a `.pt` file. This branch is specifially for such purpose that fixes compilation issue that arises with the main branch. To create a `.pt` file, modify the parameters in `torch-dftd/make_d3_module.py` and run
+
+```
+python make_d3_module.py
+```
+
+a `test_d3.pt` file will then be generated. At this point, you may need to compile the correpsonding `.pt` for each `device` but this will be fixed in the near future.
+
+
+
 ## Dependency
 
 The library is tested under following environment.
