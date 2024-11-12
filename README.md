@@ -31,7 +31,7 @@ print(f"energy {energy} eV")
 print(f"forces {forces}")
 ```
 
-## Using skin-type neighborlist
+## [Experimental] Using skin-type neighborlist
 Recomputing the neighbor list at every step can be slow, particularly when the cutoff for the D3 correction is large. To address this, a naive implementation of a neighbor list with a skin layer is provided, featuring hyperparameters similar to those in [LAMMPS](https://docs.lammps.org/neigh_modify.html#description). You can simply replace your calculator initialization with the following:
 
 ```python
@@ -39,6 +39,8 @@ calc = TorchDFTD3Calculator(atoms=atoms, device="cpu", damping="bj",
  every = 2, delay = 10, check = True, skin = 2.0) # skin-type nlist parameters
 ```
 Here, the additional parameters `every`, `delay`, `check`, and `skin` allow reusing the neighbor list as specified in the [LAMMPS](https://docs.lammps.org/neigh_modify.html#description) documentation. The `skin` parameter defines the buffer region around the cutoff distance and has the same unit as specified in the `atoms` object, which is typically in angstroms.
+
+This part of the code is released under [Academic Software Licsense (ASL)](https://github.com/ACEsuit/ACE.jl/blob/main/ASL.md) .
 
 ## Dependency
 
