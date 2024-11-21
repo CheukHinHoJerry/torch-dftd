@@ -52,12 +52,13 @@ class TorchDFTD3Calculator(Calculator):
         bidirectional: bool = True,
         cutoff_smoothing: str = "none",
         # --- neighborlist specific params ---
-        every: int = -1,  # time step that consider rebuild
-        delay: int = -1,  # delay build neighbor list until this time step since last rebuilt
-        check: bool = False,  # If true, rebuild if min(ats.positions - cached_position) > skin / 2, else must rebuild after "delay"
-        skin: float = None,  # skin parameter for checking rebuild, in angstrom
+        every: int = 1,  # time step that consider rebuild
+        delay: int = 1,  # delay build neighbor list until this time step since last rebuilt
+        check: bool = True,  # If true, rebuild if min(ats.positions - cached_position) > skin / 2, else must rebuild after "delay"
+        skin: float = 2.0,  # skin parameter for checking rebuild, in angstrom
         **kwargs,
     ):
+        
         self.dft = dft
         self.params = get_dftd3_default_params(damping, xc, old=old)
         self.damping = damping
@@ -88,7 +89,16 @@ class TorchDFTD3Calculator(Calculator):
         self.bidirectional = bidirectional
         # --- skin nlist ---
         self.Nrebuilds = 0  # record number of rebuilding nlist
-        if every != -1 and delay != -1 and skin != None:
+        if skin > 0:
+            print("=== Initializing Torch-DFTD3 with Positive Skin Distance ===")
+            print("===         Set `skin = 0` to Disable This Feature       ===")
+            print("Torch-DFTD3 Neighbourlist Parameters:")
+            print(f"  every: {every}")
+            print(f"  delay: {delay}")
+            print(f"  check: {check}")
+            print(f"  skin: {skin} Å")
+            if every > 1 and delay > 1:
+                print("[WARNING] either every or delay larger than 1 can produce missing atoms")
             self.use_skin = True
             #
             self.every = every
@@ -106,6 +116,7 @@ class TorchDFTD3Calculator(Calculator):
             self.cache_input_dicts = dict()
             self.rebuild = True
         else:
+            print("=== Initializing Torch-DFTD3 with Zero Skin Distance ===")
             self.use_skin = False
         super(TorchDFTD3Calculator, self).__init__(atoms=atoms, **kwargs)
 
