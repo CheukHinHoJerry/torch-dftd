@@ -122,6 +122,10 @@ def get_dftd3_default_params(
             rs6 = 0.5545
             s18 = 2.2609
             rs18 = 3.2297
+        elif xc == "b97-3c":
+            rs6 = 0.3700
+            s18 = 1.5000
+            rs18 = 4.1000
         elif xc == "pbe":
             rs6 = 0.4289
             s18 = 0.7875
@@ -328,6 +332,18 @@ def get_dftd3_default_params(
             rs6 = 0.4860
             s18 = 0.0000
             rs18 = 4.5000
+        elif xc == "rscan":
+            rs6 = 0.4702
+            s18 = 1.0886
+            rs18 = 5.7341
+            # Parameters are taken from Table 1 of ref:
+            # https://doi.org/10.1063/5.0041008
+        elif xc == "r2scan":
+            rs6 = 0.4948
+            s18 = 0.7898
+            rs18 = 5.7308
+            # Parameters are taken from Table 1 of ref:
+            # https://doi.org/10.1063/5.0041008
         else:
             raise ValueError(f"[ERROR] Unexpected value xc={xc}")
     elif damping == "zero":
