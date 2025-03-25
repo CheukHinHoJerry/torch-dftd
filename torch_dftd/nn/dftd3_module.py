@@ -26,6 +26,7 @@ class DFTD3Module(BaseDFTDModule):
         dtype (dtype): internal calculation is done in this precision.
         bidirectional (bool): calculated `edge_index` is bidirectional or not.
         n_chunks (int): number of times to split c6 computation to reduce peak memory.
+        do_check (bool): whether to do check on the input interatom distance again (int): number of times to split c6 computation to reduce peak memory.
     """
 
     def __init__(
@@ -38,6 +39,7 @@ class DFTD3Module(BaseDFTDModule):
         bidirectional: bool = False,
         cutoff_smoothing: str = "none",
         n_chunks: Optional[int] = None,
+        do_check: bool = False,
     ):
         super(DFTD3Module, self).__init__()
 
@@ -68,6 +70,7 @@ class DFTD3Module(BaseDFTDModule):
         self.bidirectional = bidirectional
         self.cutoff_smoothing = cutoff_smoothing
         self.n_chunks = n_chunks
+        self.do_check = do_check
 
     def calc_energy_batch(
         self,
@@ -114,5 +117,6 @@ class DFTD3Module(BaseDFTDModule):
             pos=pos_bohr,
             cell=cell_bohr,
             n_chunks=self.n_chunks,
+            do_check=self.do_check
         )
         return E_disp

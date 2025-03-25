@@ -159,6 +159,7 @@ def edisp(
     bidirectional: bool = False,
     abc: bool = False,
     n_chunks: Optional[int] = None,
+    do_check: bool = False,
 ):
     """compute d3 dispersion energy in Hartree
 
@@ -194,6 +195,17 @@ def edisp(
         energy: (n_graphs,) Energy in Hartree unit.
     """
     # compute all necessary powers of the distance
+    # do the check again so that the result is exact
+
+    if do_check:
+        within_cutoff_1 = r <= cutoff
+        edge_index = edge_index[:, within_cutoff_1]
+        shift = shift_pos[within_cutoff_1]
+        r = r[within_cutoff_1]
+
+    #batch_edge = None if batch_edge is None else batch_edge[within_cutoff_1]
+    #
+
     #if r2 is None:
     r2 = r**2  # square of distances
     #if r6 is None:
@@ -275,6 +287,7 @@ def edisp(
     if cutoff is not None and cutoff_smoothing == "poly":
         e68 *= poly_smoothing(r, cutoff)
 
+    # not doing batch evaluation - this is always the case
     # if batch_edge is None:
     g = e68.to(torch.float64).sum()[None]
     # else:
@@ -291,100 +304,107 @@ def edisp(
     # if not bidirectional:
     #     g *= 2.0
 
-    # if abc:
-    #     within_cutoff = r <= cnthr
-    #     # r_abc = r[within_cutoff]
-    #     # r2_abc = r2[within_cutoff]
-    #     edge_index_abc = edge_index[:, within_cutoff]
-    #     batch_edge_abc = None if batch_edge is None else batch_edge[within_cutoff]
-    #     # c6_abc = c6[within_cutoff]
-    #     shift_abc = None if shift_pos is None else shift_pos[within_cutoff]
+    if abc:
+        within_cutoff = r <= cnthr
+        r_abc = r[within_cutoff]
+        r2_abc = r2[within_cutoff]
+        edge_index_abc = edge_index[:, within_cutoff]
+        # batch_edge_abc = None#  if batch_edge is None else batch_edge[within_cutoff]
+        c6_abc = c6[within_cutoff]
+        shift_abc = shift_pos[within_cutoff] if shift_pos is not None else None
 
-    #     n_atoms = Z.shape[0]
-    #     if not bidirectional:
-    #         # (2, n_edges) -> (2, n_edges * 2)
-    #         edge_index_abc = torch.cat([edge_index_abc, edge_index_abc.flip(dims=[0])], dim=1)
-    #         # (n_edges, ) -> (n_edges * 2, )
-    #         batch_edge_abc = (
-    #             None
-    #             if batch_edge_abc is None
-    #             else torch.cat([batch_edge_abc, batch_edge_abc], dim=0)
-    #         )
-    #         # (n_edges, ) -> (n_edges * 2, )
-    #         shift_abc = None if shift_abc is None else torch.cat([shift_abc, -shift_abc], dim=0)
-    #     with torch.no_grad():
-    #         # triplet_node_index, triplet_edge_index = calc_triplets_cycle(edge_index_abc, n_atoms, shift=shift_abc)
-    #         # Type hinting
-    #         # triplet_node_index: Tensor
-    #         # multiplicity: Tensor
-    #         # edge_jk: Tensor
-    #         # batch_triplets: Optional[Tensor]
-    #         triplet_node_index, multiplicity, edge_jk, batch_triplets = calc_triplets(
-    #             edge_index_abc,
-    #             shift_pos=shift_abc,
-    #             dtype=pos.dtype,
-    #             batch_edge=batch_edge_abc,
-    #         )
-    #         batch_triplets = None if batch_edge is None else batch_triplets
+        n_atoms = Z.shape[0]
+        if not bidirectional:
+            # (2, n_edges) -> (2, n_edges * 2)
+            edge_index_abc = torch.cat([edge_index_abc, edge_index_abc.flip(dims=[0])], dim=1)
+            # (n_edges, ) -> (n_edges * 2, )
+            # batch_edge_abc = (
+            #     None
+            #     if batch_edge_abc is None
+            #     else torch.cat([batch_edge_abc, batch_edge_abc], dim=0)
+            # )
+            batch_edge_abc = None
+            # (n_edges, ) -> (n_edges * 2, )
+            shift_abc = None if shift_abc is None else torch.cat([shift_abc, -shift_abc], dim=0)
+            #shift_abc = torch.cat([shift_abc, -shift_abc], dim=0)
+        with torch.no_grad():
+            #triplet_node_index, triplet_edge_index = calc_triplets_cycle(edge_index_abc, n_atoms, shift=shift_abc)
+            # Type hinting
+            # triplet_node_index: Tensor
+            # multiplicity: Tensor
+            # edge_jk: Tensor
+            # batch_triplets: Optional[Tensor]
+            triplet_node_index, multiplicity, edge_jk, batch_triplets = calc_triplets(
+                edge_index_abc,
+                shift_pos=shift_abc,
+                dtype=pos.dtype,
+                #batch_edge=batch_edge_abc,
+            )
+            # batch_triplets = None if batch_edge is None else batch_triplets
 
-    #     # Apply `cnthr` cutoff threshold for r_kj
-    #     idx_j, idx_k = triplet_node_index[:, 1], triplet_node_index[:, 2]
-    #     shift_jk = (
-    #         None if shift_abc is None else shift_abc[edge_jk[:, 0]] - shift_abc[edge_jk[:, 1]]
-    #     )
-    #     r_jk = calc_distances(pos, torch.stack([idx_j, idx_k], dim=0), cell, shift_jk)
-    #     kj_within_cutoff = r_jk <= cnthr
-    #     del shift_jk
+        # Apply `cnthr` cutoff threshold for r_kj
+        idx_j, idx_k = triplet_node_index[:, 1], triplet_node_index[:, 2]
+        # shift_jk = (
+        #     None if shift_abc is None else shift_abc[edge_jk[:, 0]] - shift_abc[edge_jk[:, 1]]
+        # )
+        shift_jk = shift_abc[edge_jk[:, 0]] - shift_abc[edge_jk[:, 1]]
+        r_jk = calc_distances(pos, torch.stack([idx_j, idx_k], dim=0), cell, shift_jk)
+        kj_within_cutoff = r_jk <= cnthr
+        # del shift_jk
 
-    #     triplet_node_index = triplet_node_index[kj_within_cutoff]
-    #     multiplicity, edge_jk, batch_triplets = (
-    #         multiplicity[kj_within_cutoff],
-    #         edge_jk[kj_within_cutoff],
-    #         None if batch_triplets is None else batch_triplets[kj_within_cutoff],
-    #     )
+        triplet_node_index = triplet_node_index[kj_within_cutoff]
+        multiplicity, edge_jk, batch_triplets = (
+            multiplicity[kj_within_cutoff],
+            edge_jk[kj_within_cutoff],
+            #None if batch_triplets is None else batch_triplets[kj_within_cutoff],
+            None,
+        )
 
-    #     idx_i, idx_j, idx_k = (
-    #         triplet_node_index[:, 0],
-    #         triplet_node_index[:, 1],
-    #         triplet_node_index[:, 2],
-    #     )
-    #     shift_ij = None if shift_abc is None else -shift_abc[edge_jk[:, 0]]
-    #     shift_ik = None if shift_abc is None else -shift_abc[edge_jk[:, 1]]
+        idx_i, idx_j, idx_k = (
+            triplet_node_index[:, 0],
+            triplet_node_index[:, 1],
+            triplet_node_index[:, 2],
+        )
+        # shift_ij = None if shift_abc is None else -shift_abc[edge_jk[:, 0]]
+        # shift_ik = None if shift_abc is None else -shift_abc[edge_jk[:, 1]]
+        shift_ij = -shift_abc[edge_jk[:, 0]]
+        shift_ik = -shift_abc[edge_jk[:, 1]]
 
-    #     r_ij = calc_distances(pos, torch.stack([idx_i, idx_j], dim=0), cell, shift_ij)
-    #     r_ik = calc_distances(pos, torch.stack([idx_i, idx_k], dim=0), cell, shift_ik)
-    #     r_jk = r_jk[kj_within_cutoff]
 
-    #     Zti, Ztj, Ztk = Z[idx_i], Z[idx_j], Z[idx_k]
-    #     rrjk, rrij, rrik = r0ab[Ztk, Ztj] / r_jk, r0ab[Ztj, Zti] / r_ij, r0ab[Zti, Ztk] / r_ik
-    #     rr3_jk, rr3_ij, rr3_ik = (
-    #         (1.0 / rrjk) ** (1.0 / 3.0),
-    #         (1.0 / rrij) ** (1.0 / 3.0),
-    #         (1.0 / rrik) ** (1.0 / 3.0),
-    #     )
-    #     rav = (4.0 / 3.0) / (rr3_jk * rr3_ij * rr3_ik)
-    #     alp = params["alp"]
-    #     alp8 = alp + 2.0
-    #     damp = 1.0 / (1.0 + 6.0 * rav**alp8)
+        r_ij = calc_distances(pos, torch.stack([idx_i, idx_j], dim=0), cell, shift_ij)
+        r_ik = calc_distances(pos, torch.stack([idx_i, idx_k], dim=0), cell, shift_ik)
+        r_jk = r_jk[kj_within_cutoff]
 
-    #     c6_mem = torch.zeros((n_atoms, n_atoms), dtype=c6.dtype, device=c6.device)
-    #     c6_mem[edge_index[0], edge_index[1]] = c6
-    #     c6_mem[edge_index[1], edge_index[0]] = c6
+        Zti, Ztj, Ztk = Z[idx_i], Z[idx_j], Z[idx_k]
+        rrjk, rrij, rrik = r0ab[Ztk, Ztj] / r_jk, r0ab[Ztj, Zti] / r_ij, r0ab[Zti, Ztk] / r_ik
+        rr3_jk, rr3_ij, rr3_ik = (
+            (1.0 / rrjk) ** (1.0 / 3.0),
+            (1.0 / rrij) ** (1.0 / 3.0),
+            (1.0 / rrik) ** (1.0 / 3.0),
+        )
+        rav = (4.0 / 3.0) / (rr3_jk * rr3_ij * rr3_ik)
+        alp = params["alp"]
+        alp8 = alp + 2.0
+        damp = 1.0 / (1.0 + 6.0 * rav**alp8)
 
-    #     c9 = torch.sqrt(c6_mem[idx_k, idx_j] * c6_mem[idx_j, idx_i] * c6_mem[idx_i, idx_k])
-    #     r2ik, r2jk, r2ij = r_ik**2, r_jk**2, r_ij**2
-    #     t1 = r2jk + r2ij - r2ik
-    #     t2 = r2ij + r2ik - r2jk
-    #     t3 = r2ik + r2jk - r2ij
-    #     tmp2 = r2ik * r2jk * r2ij
-    #     ang = (0.375 * t1 * t2 * t3 / tmp2 + 1.0) / (tmp2**1.5)
-    #     e3 = damp * c9 * ang / multiplicity
+        c6_mem = torch.zeros((n_atoms, n_atoms), dtype=c6.dtype, device=c6.device)
+        c6_mem[edge_index[0], edge_index[1]] = c6
+        c6_mem[edge_index[1], edge_index[0]] = c6
 
-    #     # ---------------------------------------------------------------
-    #     # TODO: support cutoff_smoothing
-    #     if batch_edge is None:
-    #         e6abc = e3.to(torch.float64).sum()
-    #         g += e6abc
-    #     else:
-    #         g.scatter_add_(0, batch_triplets, e3.to(torch.float64))
+        c9 = torch.sqrt(c6_mem[idx_k, idx_j] * c6_mem[idx_j, idx_i] * c6_mem[idx_i, idx_k])
+        r2ik, r2jk, r2ij = r_ik**2, r_jk**2, r_ij**2
+        t1 = r2jk + r2ij - r2ik
+        t2 = r2ij + r2ik - r2jk
+        t3 = r2ik + r2jk - r2ij
+        tmp2 = r2ik * r2jk * r2ij
+        ang = (0.375 * t1 * t2 * t3 / tmp2 + 1.0) / (tmp2**1.5)
+        e3 = damp * c9 * ang / multiplicity
+
+        # ---------------------------------------------------------------
+        # TODO: support cutoff_smoothing
+        #if batch_edge is None:
+        e6abc = e3.to(torch.float64).sum()
+        g += e6abc
+        # else:
+        #    g.scatter_add_(0, batch_triplets, e3.to(torch.float64))
     return g  # (n_graphs,)

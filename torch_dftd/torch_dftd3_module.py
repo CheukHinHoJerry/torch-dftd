@@ -45,6 +45,8 @@ class TorchDFTD3TorchCalculator(nn.Module):
         cutoff: float = 95.0 * Bohr,
         cnthr: float = 40.0 * Bohr,
         abc: bool = False,
+        # --- for checking rcut again ---
+        do_check: bool = False,
         # --- torch dftd3 specific params ---
         dtype: torch.dtype = torch.float32,
         bidirectional: bool = True,
@@ -80,6 +82,7 @@ class TorchDFTD3TorchCalculator(nn.Module):
             dtype=dtype,
             bidirectional=bidirectional,
             cutoff_smoothing=cutoff_smoothing,
+            do_check=do_check
         )
         self.dftd_module.to(device)
         self.dtype = dtype

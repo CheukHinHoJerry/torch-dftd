@@ -13,10 +13,11 @@ dft = "d3"
 damping = "bj"
 xc: str = "pbe"
 old: bool = False # default
-device: str = "cuda:0"
+device: str = "cpu" #"cuda:0"
 cutoff: float = 40.0 * Bohr
 cnthr: float = 40.0 * Bohr # default
-abc: bool = False
+abc: bool = True
+do_check: bool = True
 # --- torch dftd3 specific params ---
 #dtype: torch.dtype = torch.float64
 #bidirectional: bool = True
@@ -27,10 +28,11 @@ abc: bool = False
 # new d3 module
 new_d3_module = TorchDFTD3TorchCalculator(
     device=device, damping=damping, 
-    dtype=torch.float64, xc=xc, cutoff=cutoff
+    dtype=torch.float64, xc=xc, cutoff=cutoff,
+    do_check=True
 )
 
 #
 
 model_scripted = torch.jit.script(new_d3_module)
-model_scripted.save("test_d3.pt")
+model_scripted.save("test_d3_test.pt")
