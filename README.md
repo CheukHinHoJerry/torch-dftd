@@ -42,16 +42,6 @@ Here, the additional parameters `every`, `delay`, `check`, and `skin` allow reus
 
 This part of the code is released under [Academic Software Licsense (ASL)](https://github.com/ACEsuit/ACE.jl/blob/main/ASL.md) .
 
-## Compile as torch.pt file
-To use the d3 calculator in C++, an easiest way is to compile the d3 `nn.Module` as a `.pt` file. This branch is specifially for such purpose that fixes compilation issue that arises with the main branch. To create a `.pt` file, modify the parameters in `torch-dftd/make_d3_module.py` and run
-
-```
-python make_d3_module.py
-```
-
-a `test_d3.pt` file will then be generated. At this point, you may need to compile the correpsonding `.pt` for each `device` but this will be fixed in the near future.
-
-
 ## Dependency
 
 The library is tested under following environment.

@@ -7,9 +7,9 @@ from torch import Tensor
 def calc_distances(
     pos: Tensor,
     edge_index: Tensor,
-    cell: Tensor,
-    shift_pos: Tensor,
-    eps:float = 1e-20,
+    cell: Optional[Tensor] = None,
+    shift_pos: Optional[Tensor] = None,
+    eps=1e-20,
 ) -> Tensor:
     """Distance calculation function.
 
@@ -24,14 +24,13 @@ def calc_distances(
         Dij (Tensor): (n_edges, ) distances of edges
 
     """
-    assert cell is not None
-    idx_i = edge_index[0, :]
-    idx_j = edge_index[1, :]
+
+    idx_i, idx_j = edge_index
     # calculate interatomic distances
     Ri = pos[idx_i]
     Rj = pos[idx_j]
-    #if cell is not None:
-    Rj += shift_pos
+    if cell is not None:
+        Rj += shift_pos
     # eps is to avoid Nan in backward when Dij = 0 with sqrt.
     Dij = torch.sqrt(torch.sum((Ri - Rj) ** 2, dim=-1) + eps)
     return Dij

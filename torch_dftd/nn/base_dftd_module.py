@@ -15,9 +15,11 @@ class BaseDFTDModule(nn.Module):
         Z: Tensor,
         pos: Tensor,
         edge_index: Tensor,
-        cell: Tensor,
-        pbc: Tensor,
-        shift_pos: Tensor,
+        cell: Optional[Tensor] = None,
+        pbc: Optional[Tensor] = None,
+        shift_pos: Optional[Tensor] = None,
+        batch: Optional[Tensor] = None,
+        batch_edge: Optional[Tensor] = None,
         damping: str = "zero",
     ) -> Tensor:
         """Forward computation to calculate atomic wise dispersion energy.
@@ -48,6 +50,8 @@ class BaseDFTDModule(nn.Module):
         cell: Optional[Tensor] = None,
         pbc: Optional[Tensor] = None,
         shift_pos: Optional[Tensor] = None,
+        batch: Optional[Tensor] = None,
+        batch_edge: Optional[Tensor] = None,
         damping: str = "zero",
     ) -> List[Dict[str, Any]]:
         """Forward computation of dispersion energy
@@ -70,30 +74,29 @@ class BaseDFTDModule(nn.Module):
         """
         with torch.no_grad():
             E_disp = self.calc_energy_batch(
-                Z, pos, edge_index, cell, pbc, shift_pos, damping=damping
-                #Z, pos, edge_index, cell, pbc, shift_pos, batch, batch_edge, damping=damping
+                Z, pos, edge_index, cell, pbc, shift_pos, batch, batch_edge, damping=damping
             )
-        #if batch is None:
-        return [{"energy": E_disp.item()}]
-        # else:
-        #     if batch.size()[0] == 0:
-        #         n_graphs = 1
-        #     else:
-        #         n_graphs = int(batch[-1]) + 1
-        #     return [{"energy": E_disp[i].item()} for i in range(n_graphs)]
+        if batch is None:
+            return [{"energy": E_disp.item()}]
+        else:
+            if batch.size()[0] == 0:
+                n_graphs = 1
+            else:
+                n_graphs = int(batch[-1]) + 1
+            return [{"energy": E_disp[i].item()} for i in range(n_graphs)]
 
     def calc_energy_and_forces(
         self,
         Z: Tensor,
         pos: Tensor,
         edge_index: Tensor,
-        cell: Tensor,
-        pbc: Tensor,
-        shift_pos: Tensor,
-        #batch = None,
-        #batch_edge = None,
+        cell: Optional[Tensor] = None,
+        pbc: Optional[Tensor] = None,
+        shift_pos: Optional[Tensor] = None,
+        batch: Optional[Tensor] = None,
+        batch_edge: Optional[Tensor] = None,
         damping: str = "zero",
-    ) -> List[Dict[str, Tensor]]:
+    ) -> List[Dict[str, Any]]:
         """Forward computation of dispersion energy, force and stress
 
         Args:
@@ -111,86 +114,65 @@ class BaseDFTDModule(nn.Module):
                 "stress": (6,)
         """
         pos.requires_grad_(True)
-        # if cell is not None:
-        #     # pos is depending on `cell` size
-        #     # We need to explicitly include this dependency to calculate cell gradient
-        #     # for stress computation.
-        #     # pos is assumed to be inside "cell", so relative position `rel_pos` lies between 0~1.
-        #     assert isinstance(shift_pos, Tensor)
-        shift_pos.requires_grad_(True)
+        if cell is not None:
+            # pos is depending on `cell` size
+            # We need to explicitly include this dependency to calculate cell gradient
+            # for stress computation.
+            # pos is assumed to be inside "cell", so relative position `rel_pos` lies between 0~1.
+            assert isinstance(shift_pos, Tensor)
+            shift_pos.requires_grad_(True)
 
         E_disp = self.calc_energy_batch(
-            #Z, pos, edge_index, cell, pbc, shift_pos, batch, batch_edge, damping=damping
-            Z, pos, edge_index, cell, pbc, shift_pos, damping=damping
+            Z, pos, edge_index, cell, pbc, shift_pos, batch, batch_edge, damping=damping
         )
 
         E_disp.sum().backward()
         forces = -pos.grad  # [eV/angstrom]
+        if batch is None:
+            results_list = [{"energy": E_disp.item(), "forces": forces.cpu().numpy()}]
+        else:
+            if batch.size()[0] == 0:
+                n_graphs = 1
+            else:
+                n_graphs = int(batch[-1]) + 1
+            results_list = [{"energy": E_disp[i].item()} for i in range(n_graphs)]
+            for i in range(n_graphs):
+                results_list[i]["forces"] = forces[batch == i].cpu().numpy()
 
-        ###
-        results_list = [{"energy": E_disp, "forces": forces}]#.cpu().numpy()}]
-        voigt_left = [0, 1, 2, 1, 2, 0]
-        voigt_right = [0, 1, 2, 2, 0, 1]
-    
-        cell_volume = torch.det(cell).abs()
-        cell_grad = torch.sum(
-            (pos[:, voigt_left] * pos.grad[:, voigt_right]).to(torch.float64), dim=0
-            )
-        cell_grad += torch.sum(
-                (shift_pos[:, voigt_left] * shift_pos.grad[:, voigt_right]).to(torch.float64),
-                dim=0,
+        if cell is not None:
+            # stress = torch.mm(cell_grad, cell.T) / cell_volume
+            # Get stress in Voigt notation (xx, yy, zz, yz, xz, xy)
+            assert isinstance(shift_pos, Tensor)
+            voigt_left = [0, 1, 2, 1, 2, 0]
+            voigt_right = [0, 1, 2, 2, 0, 1]
+            if batch is None:
+                cell_volume = torch.det(cell).abs()
+                cell_grad = torch.sum(
+                    (pos[:, voigt_left] * pos.grad[:, voigt_right]).to(torch.float64), dim=0
                 )
-        stress = cell_grad.to(cell.dtype) / cell_volume
-        results_list[0]["stress"] = stress #.detach().cpu().numpy()
+                cell_grad += torch.sum(
+                    (shift_pos[:, voigt_left] * shift_pos.grad[:, voigt_right]).to(torch.float64),
+                    dim=0,
+                )
+                stress = cell_grad.to(cell.dtype) / cell_volume
+                results_list[0]["stress"] = stress.detach().cpu().numpy()
+            else:
+                assert isinstance(batch_edge, Tensor)
+                # cell (bs, 3, 3)
+                cell_volume = torch.det(cell).abs()
+                cell_grad = pos.new_zeros((n_graphs, 6), dtype=torch.float64)
+                cell_grad.scatter_add_(
+                    0,
+                    batch.view(batch.size()[0], 1).expand(batch.size()[0], 6),
+                    (pos[:, voigt_left] * pos.grad[:, voigt_right]).to(torch.float64),
+                )
+                cell_grad.scatter_add_(
+                    0,
+                    batch_edge.view(batch_edge.size()[0], 1).expand(batch_edge.size()[0], 6),
+                    (shift_pos[:, voigt_left] * shift_pos.grad[:, voigt_right]).to(torch.float64),
+                )
+                stress = cell_grad.to(cell.dtype) / cell_volume[:, None]
+                stress = stress.detach().cpu().numpy()
+                for i in range(n_graphs):
+                    results_list[i]["stress"] = stress[i]
         return results_list
-        ###
-
-
-        # if batch is None:
-        #     results_list = [{"energy": E_disp.item(), "forces": forces.cpu().numpy()}]
-        # else:
-        #     if batch.size()[0] == 0:
-        #         n_graphs = 1
-        #     else:
-        #         n_graphs = int(batch[-1]) + 1
-        #     results_list = [{"energy": E_disp[i].item()} for i in range(n_graphs)]
-        #     for i in range(n_graphs):
-        #         results_list[i]["forces"] = forces[batch == i].cpu().numpy()
-
-        # if cell is not None:
-        #     # stress = torch.mm(cell_grad, cell.T) / cell_volume
-        #     # Get stress in Voigt notation (xx, yy, zz, yz, xz, xy)
-        #     assert isinstance(shift_pos, Tensor)
-        #     voigt_left = [0, 1, 2, 1, 2, 0]
-        #     voigt_right = [0, 1, 2, 2, 0, 1]
-        #     if batch is None:
-        #         cell_volume = torch.det(cell).abs()
-        #         cell_grad = torch.sum(
-        #             (pos[:, voigt_left] * pos.grad[:, voigt_right]).to(torch.float64), dim=0
-        #         )
-        #         cell_grad += torch.sum(
-        #             (shift_pos[:, voigt_left] * shift_pos.grad[:, voigt_right]).to(torch.float64),
-        #             dim=0,
-        #         )
-        #         stress = cell_grad.to(cell.dtype) / cell_volume
-        #         results_list[0]["stress"] = stress.detach().cpu().numpy()
-        #     else:
-        #         assert isinstance(batch_edge, Tensor)
-        #         # cell (bs, 3, 3)
-        #         cell_volume = torch.det(cell).abs()
-        #         cell_grad = pos.new_zeros((n_graphs, 6), dtype=torch.float64)
-        #         cell_grad.scatter_add_(
-        #             0,
-        #             batch.view(batch.size()[0], 1).expand(batch.size()[0], 6),
-        #             (pos[:, voigt_left] * pos.grad[:, voigt_right]).to(torch.float64),
-        #         )
-        #         cell_grad.scatter_add_(
-        #             0,
-        #             batch_edge.view(batch_edge.size()[0], 1).expand(batch_edge.size()[0], 6),
-        #             (shift_pos[:, voigt_left] * shift_pos.grad[:, voigt_right]).to(torch.float64),
-        #         )
-        #         stress = cell_grad.to(cell.dtype) / cell_volume[:, None]
-        #         stress = stress.detach().cpu().numpy()
-        #         for i in range(n_graphs):
-        #             results_list[i]["stress"] = stress[i]
-#        return results_list
