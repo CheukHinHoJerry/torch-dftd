@@ -7,9 +7,9 @@ from torch_dftd.functions.triplets_kernel import _calc_triplets_core_gpu
 
 def calc_triplets(
     edge_index: Tensor,
-    shift_pos: Optional[Tensor] = None,
-    dtype=torch.float32,
-    batch_edge: Optional[Tensor] = None,
+    shift_pos: Tensor,
+    dtype: torch.dtype = torch.float32,
+    # batch_edge: Optional[Tensor] = None,  # Allow Tensor or None
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
     """Calculate triplet edge index.
 
@@ -28,7 +28,10 @@ def calc_triplets(
            i.e.: idx_j, idx_k = edge_jk[:, 0], edge_jk[:, 1]
         batch_triplets (Tensor): (n_triplets,) batch indices for each triplets.
     """
-    dst, src = edge_index
+    #dst, src = edge_index
+    dst = edge_index[0, :]
+    src = edge_index[1, :]
+
     is_larger = dst >= src
     dst = dst[is_larger]
     src = src[is_larger]
@@ -37,16 +40,16 @@ def calc_triplets(
     src = src[sort_inds]
     dst = dst[sort_inds]
 
-    if shift_pos is None:
-        edge_indices = torch.arange(src.shape[0], dtype=torch.long, device=edge_index.device)
-    else:
-        edge_indices = torch.arange(shift_pos.shape[0], dtype=torch.long, device=edge_index.device)
-        edge_indices = edge_indices[is_larger][sort_inds]
+    # if shift_pos is None:
+    #     edge_indices = torch.arange(src.shape[0], dtype=torch.long, device=edge_index.device)
+    # else:
+    edge_indices = torch.arange(shift_pos.shape[0], dtype=torch.long, device=edge_index.device)
+    edge_indices = edge_indices[is_larger][sort_inds]
 
-    if batch_edge is None:
-        batch_edge = torch.zeros(src.shape[0], dtype=torch.long, device=edge_index.device)
-    else:
-        batch_edge = batch_edge[is_larger][sort_inds]
+    #if batch_edge is None:
+    batch_edge = torch.zeros(src.shape[0], dtype=torch.long, device=edge_index.device)
+    # else:
+    #     batch_edge = batch_edge[is_larger][sort_inds]
 
     unique, counts = torch.unique_consecutive(src, return_counts=True)
     counts_cumsum = torch.cumsum(counts, dim=0)
@@ -54,17 +57,19 @@ def calc_triplets(
         [torch.zeros((1,), device=counts.device, dtype=torch.long), counts_cumsum], dim=0
     )
 
-    if str(unique.device) == "cpu":
-        return _calc_triplets_core(
-            counts, unique, dst, edge_indices, batch_edge, counts_cumsum, dtype=dtype
+    # assert str(unique.device) == "cpu"
+
+    # if str(unique.device) == "cpu":
+    return _calc_triplets_core(
+        counts, unique, dst, edge_indices, batch_edge, counts_cumsum, dtype=dtype
         )
-    else:
-        return _calc_triplets_core_gpu(
-            counts, unique, dst, edge_indices, batch_edge, counts_cumsum, dtype=dtype
-        )
+    # else:
+    #     return _calc_triplets_core_gpu(
+    #         counts, unique, dst, edge_indices, batch_edge, counts_cumsum, dtype=dtype
+    #     )
 
 
-def _calc_triplets_core(counts, unique, dst, edge_indices, batch_edge, counts_cumsum, dtype):
+def _calc_triplets_core(counts, unique, dst, edge_indices, batch_edge, counts_cumsum, dtype: torch.dtype):
     device = unique.device
     n_triplets = torch.sum(counts * (counts - 1) / 2)
     if n_triplets == 0:
@@ -84,10 +89,10 @@ def _calc_triplets_core(counts, unique, dst, edge_indices, batch_edge, counts_cu
     batch_triplets_list = []  # (n_triplet_edges) represents batch index for triplets
     for i in range(len(unique)):
         _src = unique[i].item()
-        _n_edges = counts[i].item()
+        _n_edges = int(counts[i].item())
         _dst = dst[counts_cumsum[i] : counts_cumsum[i + 1]]
         _offset = counts_cumsum[i].item()
-        _batch_index = batch_edge[counts_cumsum[i]].item()
+        _batch_index = batch_edge[counts_cumsum[i]]
         for j in range(_n_edges - 1):
             for k in range(j + 1, _n_edges):
                 _dst0 = _dst[j].item()  # _dst0 maybe swapped with _dst1, need to reset here.
@@ -101,30 +106,30 @@ def _calc_triplets_core(counts, unique, dst, edge_indices, batch_edge, counts_cu
                     _dst0, _dst1 = _dst1, _dst0
                     _j, _k = k, j
 
-                triplet_node_index_list.append([_src, _dst0, _dst1])
+                triplet_node_index_list.append(torch.tensor([_src, _dst0, _dst1]))
                 edge_jk_list.append(
-                    [
+                    torch.tensor([
                         _offset + _j,
                         _offset + _k,
-                    ]
+                    ])
                 )
                 # --- multiplicity ---
                 if _dst0 == _dst1:
                     if _src == _dst0:
                         # Case 0: _src == _dst0 == _dst1
-                        multiplicity_list.append(3.0)
+                        multiplicity_list.append(torch.tensor(3.0))
                     else:
                         # Case 1: _src < _dst0 == _dst1
-                        multiplicity_list.append(1.0)
+                        multiplicity_list.append(torch.tensor(1.0))
                 else:
                     if _src == _dst0:
                         # Case 2: _src == _dst0 < _dst1
-                        multiplicity_list.append(2.0)
+                        multiplicity_list.append(torch.tensor(2.0))
                     else:
                         assert i < _dst0
                         assert i < _dst1
                         # Case 3: i < _dst0 < _dst1
-                        multiplicity_list.append(1.0)
+                        multiplicity_list.append(torch.tensor(1.0))
 
     # (n_triplet_edges, 3)
     triplet_node_index = torch.as_tensor(triplet_node_index_list, device=device)

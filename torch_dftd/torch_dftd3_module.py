@@ -45,6 +45,8 @@ class TorchDFTD3TorchCalculator(nn.Module):
         cutoff: float = 95.0 * Bohr,
         cnthr: float = 40.0 * Bohr,
         abc: bool = False,
+        # --- for checking rcut again ---
+        do_check: bool = False,
         # --- torch dftd3 specific params ---
         dtype: torch.dtype = torch.float32,
         bidirectional: bool = True,
@@ -63,31 +65,32 @@ class TorchDFTD3TorchCalculator(nn.Module):
         self.abc = abc
         self.old = old
         self.device = torch.device(device)
-        if old:
-            self.dftd_module: torch.nn.Module = DFTD2Module(
-                self.params,
-                cutoff=cutoff,
-                dtype=dtype,
-                bidirectional=bidirectional,
-                cutoff_smoothing=cutoff_smoothing,
-            )
-        else:
-            self.dftd_module = DFTD3Module(
-                self.params,
-                cutoff=cutoff,
-                cnthr=cnthr,
-                abc=abc,
-                dtype=dtype,
-                bidirectional=bidirectional,
-                cutoff_smoothing=cutoff_smoothing,
-            )
+        # if old:
+        #     self.dftd_module: torch.nn.Module = DFTD2Module(
+        #         self.params,
+        #         cutoff=cutoff,
+        #         dtype=dtype,
+        #         bidirectional=bidirectional,
+        #         cutoff_smoothing=cutoff_smoothing,
+        #     )
+        # else:
+        self.dftd_module = DFTD3Module(
+            self.params,
+            cutoff=cutoff,
+            cnthr=cnthr,
+            abc=abc,
+            dtype=dtype,
+            bidirectional=bidirectional,
+            cutoff_smoothing=cutoff_smoothing,
+            do_check=do_check
+        )
         self.dftd_module.to(device)
         self.dtype = dtype
         self.cutoff = cutoff
         self.bidirectional = bidirectional
         # 
         # compatibility with ase calculator
-        self.results = {}
+        #self.results: Dict[str, torch.Tensor] = {}
         # --- skin nlist ---
         self.Nrebuilds = 0  # record number of rebuilding nlist
         if every != -1 and delay != -1 and skin != None:
@@ -114,31 +117,34 @@ class TorchDFTD3TorchCalculator(nn.Module):
     def forward(
         self,
         input_data: Dict[str, torch.Tensor],
-    ) -> Dict[str, Optional[torch.Tensor]]:
+    ) -> Dict[str, torch.Tensor]:
         # 
         # wrap the `data` as torch-dftd equivalent format
         # in torch_dftd3_calculator.py
         # data is from libSG
         # old_pos = copy.deepcopy(data['positions']),
-        pos=input_data['positions']
-        Z = input_data['Z']
-        cell = input_data['cell']
-        pbc = input_data['pbc']
-        edge_index = input_data['edge_index']
-        S = input_data["unit_shifts"]
+        pos=input_data['positions'].to(self.device)
+        Z = input_data['Z'].to(self.device)
+        cell = input_data['cell'].to(self.device)
+        pbc = input_data['pbc'].to(self.device)
+        edge_index = input_data['edge_index'].to(self.device)
+        S = input_data["unit_shifts"].to(self.device)
 
         # transform S here
-        if any(pbc):
-            cell = cell.to(self.device)
-        else:
-            cell = None
+        # if any(pbc):
+        #     cell = cell.to(self.device)
+        # else:
+        #     cell = None
 
-        if cell is None:
-            shift_pos = S
-        else:
-            shift_pos = torch.mm(S, cell.detach())
+        # if cell is None:
+        #     shift_pos = S
+        # else:
+        # assume cell is always given
+        cell = cell.to(self.device)
+        shift_pos = torch.mm(S, cell.detach())
 
         results = self.dftd_module.calc_energy_and_forces(
+        #results = self.dftd_module.calc_energy_batch(
                 pos = pos,
                 Z = Z,
                 cell = cell,
@@ -147,24 +153,25 @@ class TorchDFTD3TorchCalculator(nn.Module):
                 shift_pos=shift_pos,
                 damping=self.damping,
             )[0]
-        self.results["energy"] = results["energy"]
-        self.results["free_energy"] = self.results["energy"]
+        #self.results["energy"] = results#["energy"]
+        #self.results["free_energy"] = self.results["energy"]
 
+        # skip
         # Referenced DFTD3 impl.
-        if self.dft is not None:
-            try:
-                efree = self.dft.get_potential_energy(force_consistent=True)
-                self.results["free_energy"] += efree
-            except PropertyNotImplementedError:
-                pass
+        # if self.dft is not None:
+        #     try:
+        #         efree = self.dft.get_potential_energy(force_consistent=True)
+        #         self.results["free_energy"] += efree
+        #     except PropertyNotImplementedError:
+        #         pass
 
-        if "forces" in results:
-            self.results["forces"] = results["forces"]
-        if "stress" in results:
-            self.results["stress"] = results["stress"]
+        #if "forces" in results:
+        #self.results["forces"] = results["forces"]
+        #if "stress" in results:
+        #self.results["stress"] = results["stress"]
         
         return {
-            "energy": self.results["energy"],
-            "forces": self.results["forces"],
-            "stress": self.results["stress"],
+            "energy": results["energy"],
+            "forces": results["forces"],
+            "stress": results["stress"],
         }
